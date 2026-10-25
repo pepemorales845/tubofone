@@ -238,6 +238,8 @@
               window.TUBOFONE_CURRENT_EXTRA = s;
               const btn = document.querySelector('button[aria-haspopup="listbox"] span.truncate, button span.font-semibold');
               if (btn) btn.textContent = s.name;
+              // Mark that we want to use this sequence
+              window.TUBOFONE_USE_EXTRA = true;
             };
             list.appendChild(item);
           });
@@ -331,6 +333,49 @@
       modal.remove();
     };
     modal.querySelector('#close-creator').onclick = () => modal.remove();
+  }
+
+  
+  // Override note falling when an extra song is selected
+  const origPlay = window.playSong || function(){};
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const txt = (btn.textContent||'') + (btn.getAttribute('aria-label')||'');
+    if (/play|reproduc|empezar|▶/i.test(txt) && window.TUBOFONE_USE_EXTRA && window.TUBOFONE_CURRENT_EXTRA) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      playExtraSong(window.TUBOFONE_CURRENT_EXTRA);
+    }
+  }, true);
+
+  function playExtraSong(song) {
+    const notes = song.notes || [];
+    const bpm = song.bpm || 100;
+    const interval = 60000 / bpm / 2; // rough timing
+    let i = 0;
+    const lanes = document.querySelectorAll('.lanes > div');
+    function dropNext() {
+      if (i >= notes.length) return;
+      const note = notes[i];
+      // Map note to tube index (c4=0, d4=1, e4=2, f4=3, g4=4, a4=5, b4=6, c5=7)
+      const map = {c4:0,d4:1,e4:2,f4:3,g4:4,a4:5,b4:6,c5:7};
+      const idx = map[note] ?? 0;
+      if (lanes[idx]) {
+        // Simulate note drop by flashing the tube
+        const tube = lanes[idx].querySelector('.tube-hit') || lanes[idx];
+        tube.style.transition = 'none';
+        tube.style.transform = 'translateY(-40px)';
+        tube.style.opacity = '1';
+        setTimeout(() => {
+          tube.style.transition = 'transform 0.4s, opacity 0.4s';
+          tube.style.transform = 'translateY(0)';
+        }, 50);
+      }
+      i++;
+      setTimeout(dropNext, interval);
+    }
+    dropNext();
   }
 
   setTimeout(addCreatorButton, 800);
