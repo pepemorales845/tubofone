@@ -17,6 +17,8 @@
 
 
 
+
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function(){
@@ -31,7 +33,7 @@
   let myTube = isJoiner ? parseInt(claimedTube, 10) : null;
 
   function connectWS() {
-    if (ws && ws.readyState === WebSocket.OPEN) return;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     ws = new WebSocket(WS_URL);
     ws.onopen = () => {
       if (mySession) {
@@ -46,44 +48,64 @@
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.type === 'play') {
-          // Sync play
+        if (msg.type === 'play' && isJoiner) {
           const delay = Math.max(0, (msg.startTime || Date.now()) - Date.now());
-          setTimeout(() => startSongForEveryone(msg.song), delay);
-        }
-        if (msg.type === 'stop') {
-          // TODO: stop if needed
+          setTimeout(() => forceStartSong(msg.song), delay);
         }
       } catch(e) {}
     };
-    ws.onclose = () => setTimeout(connectWS, 2000);
+    ws.onclose = () => setTimeout(connectWS, 2500);
   }
 
-  function startSongForEveryone(songName) {
-    // Try to select song and start
+  function forceStartSong(songName) {
+    // For joiners: select song and start, ignoring UI locks
     setTimeout(() => {
       const songBtn = document.querySelector('button[aria-haspopup="listbox"]');
       if (songBtn) songBtn.click();
       setTimeout(() => {
         const options = document.querySelectorAll('[role="option"], button, li, div');
         for (const opt of options) {
-          if (opt.textContent && songName && opt.textContent.includes(songName)) {
+          if (songName && opt.textContent && opt.textContent.includes(songName)) {
             opt.click();
             break;
           }
         }
         setTimeout(() => {
           const tabs = document.querySelectorAll('[role="tab"]');
-          for (const t of tabs) if (/canción|song/i.test(t.textContent)) t.click();
+          for (const t of tabs) if (/canción|song/i.test(t.textContent||'')) t.click();
           setTimeout(() => {
             const playBtn = Array.from(document.querySelectorAll('button')).find(b =>
               /play|reproduc|empezar|▶|start/i.test((b.textContent||'') + (b.getAttribute('aria-label')||''))
             );
             if (playBtn) playBtn.click();
-          }, 300);
+          }, 250);
         }, 200);
       }, 200);
-    }, 100);
+    }, 80);
+  }
+
+  function lockJoinerUI() {
+    if (!isJoiner) return;
+    // Disable song selector and play-related controls
+    const songBtn = document.querySelector('button[aria-haspopup="listbox"]');
+    if (songBtn) {
+      songBtn.style.pointerEvents = 'none';
+      songBtn.style.opacity = '0.4';
+      songBtn.title = 'Solo el master puede elegir la canción';
+    }
+    document.querySelectorAll('[role="tab"]').forEach(tab => {
+      if (/canción|aleatorio|prueba/i.test(tab.textContent||'')) {
+        tab.style.pointerEvents = 'none';
+        tab.style.opacity = '0.4';
+      }
+    });
+    // Hide or disable any obvious play buttons for joiner
+    document.querySelectorAll('button').forEach(btn => {
+      const txt = (btn.textContent||'') + (btn.getAttribute('aria-label')||'');
+      if (/play|reproduc|empezar|▶/i.test(txt) && !btn.closest('.tube-hit')) {
+        btn.style.display = 'none';
+      }
+    });
   }
 
   function applyTubeClaim() {
@@ -91,21 +113,23 @@
     const lanes = document.querySelectorAll('.lanes > div');
     lanes.forEach((el, i) => {
       if (i !== myTube) {
-        el.style.opacity = '0.12';
+        el.style.opacity = '0.1';
         el.style.pointerEvents = 'none';
         el.style.filter = 'grayscale(1)';
       } else {
         el.style.opacity = '1';
         el.style.outline = '3px solid #f0c14b';
+        el.style.borderRadius = '8px';
       }
     });
     if (!document.getElementById('join-banner')) {
       const banner = document.createElement('div');
       banner.id = 'join-banner';
-      banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#f0c14b;color:#111;padding:8px 18px;border-radius:999px;font-weight:700;z-index:9999;font-size:14px;';
-      banner.textContent = 'Tubo ' + (myTube + 1) + ' · sincronizado';
+      banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#f0c14b;color:#111;padding:8px 18px;border-radius:999px;font-weight:700;z-index:9999;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+      banner.textContent = 'Tubo ' + (myTube + 1) + ' · espera al master';
       document.body.appendChild(banner);
     }
+    lockJoinerUI();
   }
 
   function setupQR() {
@@ -113,6 +137,7 @@
     if (!logo || logo.dataset.qrReady) return;
     logo.dataset.qrReady = '1';
     logo.style.cursor = 'pointer';
+    logo.title = 'Pulsa para compartir tubos por QR';
 
     if (!document.getElementById('qr-modal')) {
       const modal = document.createElement('div');
@@ -121,7 +146,7 @@
       modal.innerHTML = `
         <div style="background:#1a1d26;padding:24px;border-radius:16px;text-align:center;max-width:90vw;">
           <h3 style="margin:0 0 12px;font-size:1.25rem;color:#fff;">Comparte un tubo</h3>
-          <p style="margin:0 0 16px;color:#aaa;font-size:0.9rem;">El otro jugador escanea y se sincroniza en tiempo real.</p>
+          <p style="margin:0 0 16px;color:#aaa;font-size:0.9rem;">Solo tú controlas la canción. Los demás solo tocan su tubo.</p>
           <div id="qr-code" style="background:white;padding:12px;border-radius:8px;display:inline-block;"></div>
           <p id="qr-tube-label" style="margin:12px 0 0;font-weight:600;color:#fff;"></p>
           <button id="qr-close" style="margin-top:16px;padding:8px 20px;border-radius:999px;background:#f0c14b;border:none;font-weight:600;cursor:pointer;">Cerrar</button>
@@ -143,7 +168,6 @@
       new QRCode(qrDiv, { text: url, width: 220, height: 220 });
       label.textContent = 'Tubo ' + (tube + 1);
       modal.style.display = 'flex';
-      // Join as host
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type:'join', sessionId: mySession, tube: null, role:'host' }));
       }
@@ -152,23 +176,26 @@
     document.getElementById('qr-close').onclick = () => modal.style.display = 'none';
     modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
 
-    // Hook play button to broadcast
-    document.addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn || !mySession || myRole !== 'host') return;
-      if (/play|reproduc|empezar|▶/i.test((btn.textContent||'') + (btn.getAttribute('aria-label')||''))) {
-        const songSpan = document.querySelector('button[aria-haspopup] span.truncate, button span.font-semibold');
-        const song = songSpan ? songSpan.textContent.trim() : '';
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'play',
-            sessionId: mySession,
-            song: song,
-            startTime: Date.now() + 300
-          }));
+    // Only host can broadcast play
+    if (!isJoiner) {
+      document.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn || !mySession) return;
+        const txt = (btn.textContent||'') + (btn.getAttribute('aria-label')||'');
+        if (/play|reproduc|empezar|▶/i.test(txt)) {
+          const songSpan = document.querySelector('button[aria-haspopup] span.truncate, button span.font-semibold');
+          const song = songSpan ? songSpan.textContent.trim() : '';
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'play',
+              sessionId: mySession,
+              song: song,
+              startTime: Date.now() + 400
+            }));
+          }
         }
-      }
-    }, true);
+      }, true);
+    }
   }
 
   function init() {
@@ -179,9 +206,10 @@
 
   init();
   window.addEventListener('load', init);
-  setTimeout(init, 600);
-  setTimeout(init, 1800);
-  const obs = new MutationObserver(applyTubeClaim);
+  setTimeout(init, 500);
+  setTimeout(init, 1500);
+  setTimeout(init, 3000);
+  const obs = new MutationObserver(() => { applyTubeClaim(); lockJoinerUI(); });
   obs.observe(document.body, { childList: true, subtree: true });
 })();
 </script>
