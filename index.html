@@ -15,67 +15,97 @@
 
 
 
+
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function(){
+  const WS_URL = 'wss://tubofone.srv2031686.hstgr.cloud/ws';
   const params = new URLSearchParams(location.search);
   const claimedTube = params.get('tube');
-  const sharedSong = params.get('song');
-  const isJoiner = claimedTube !== null;
+  const sessionFromUrl = params.get('join');
+  const isJoiner = claimedTube !== null && sessionFromUrl;
+  let ws = null;
+  let mySession = sessionFromUrl || null;
+  let myRole = isJoiner ? 'player' : 'host';
+  let myTube = isJoiner ? parseInt(claimedTube, 10) : null;
+
+  function connectWS() {
+    if (ws && ws.readyState === WebSocket.OPEN) return;
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => {
+      if (mySession) {
+        ws.send(JSON.stringify({
+          type: 'join',
+          sessionId: mySession,
+          tube: myTube,
+          role: myRole
+        }));
+      }
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'play') {
+          // Sync play
+          const delay = Math.max(0, (msg.startTime || Date.now()) - Date.now());
+          setTimeout(() => startSongForEveryone(msg.song), delay);
+        }
+        if (msg.type === 'stop') {
+          // TODO: stop if needed
+        }
+      } catch(e) {}
+    };
+    ws.onclose = () => setTimeout(connectWS, 2000);
+  }
+
+  function startSongForEveryone(songName) {
+    // Try to select song and start
+    setTimeout(() => {
+      const songBtn = document.querySelector('button[aria-haspopup="listbox"]');
+      if (songBtn) songBtn.click();
+      setTimeout(() => {
+        const options = document.querySelectorAll('[role="option"], button, li, div');
+        for (const opt of options) {
+          if (opt.textContent && songName && opt.textContent.includes(songName)) {
+            opt.click();
+            break;
+          }
+        }
+        setTimeout(() => {
+          const tabs = document.querySelectorAll('[role="tab"]');
+          for (const t of tabs) if (/canción|song/i.test(t.textContent)) t.click();
+          setTimeout(() => {
+            const playBtn = Array.from(document.querySelectorAll('button')).find(b =>
+              /play|reproduc|empezar|▶|start/i.test((b.textContent||'') + (b.getAttribute('aria-label')||''))
+            );
+            if (playBtn) playBtn.click();
+          }, 300);
+        }, 200);
+      }, 200);
+    }, 100);
+  }
 
   function applyTubeClaim() {
     if (!isJoiner) return;
     const lanes = document.querySelectorAll('.lanes > div');
-    const idx = parseInt(claimedTube, 10);
     lanes.forEach((el, i) => {
-      if (i !== idx) {
+      if (i !== myTube) {
         el.style.opacity = '0.12';
         el.style.pointerEvents = 'none';
         el.style.filter = 'grayscale(1)';
       } else {
         el.style.opacity = '1';
         el.style.outline = '3px solid #f0c14b';
-        el.style.borderRadius = '8px';
       }
     });
     if (!document.getElementById('join-banner')) {
       const banner = document.createElement('div');
       banner.id = 'join-banner';
-      banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#f0c14b;color:#111;padding:8px 18px;border-radius:999px;font-weight:700;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.3);';
-      banner.textContent = 'Tubo ' + (idx + 1) + ' es tuyo · espera la canción';
+      banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#f0c14b;color:#111;padding:8px 18px;border-radius:999px;font-weight:700;z-index:9999;font-size:14px;';
+      banner.textContent = 'Tubo ' + (myTube + 1) + ' · sincronizado';
       document.body.appendChild(banner);
     }
-  }
-
-  function tryStartSharedSong() {
-    if (!sharedSong) return;
-    // Try to select the song by clicking the song selector and matching text
-    setTimeout(() => {
-      const songBtn = document.querySelector('button[aria-haspopup="listbox"]') || document.querySelector('button');
-      if (songBtn && songBtn.textContent.includes('Canción') || songBtn) {
-        // Open dropdown if possible
-        songBtn.click();
-        setTimeout(() => {
-          const options = document.querySelectorAll('[role="option"], button, li');
-          for (const opt of options) {
-            if (opt.textContent && opt.textContent.includes(sharedSong)) {
-              opt.click();
-              break;
-            }
-          }
-          // Then try to switch to song mode and play
-          setTimeout(() => {
-            const tabs = document.querySelectorAll('[role="tab"]');
-            for (const t of tabs) if (t.textContent.includes('Canción') || t.textContent.includes('canción')) t.click();
-            // Look for play button
-            setTimeout(() => {
-              const play = Array.from(document.querySelectorAll('button')).find(b => /play|reproduc|empezar|▶/i.test(b.textContent + b.ariaLabel));
-              if (play) play.click();
-            }, 400);
-          }, 300);
-        }, 200);
-      }
-    }, 800);
   }
 
   function setupQR() {
@@ -83,7 +113,6 @@
     if (!logo || logo.dataset.qrReady) return;
     logo.dataset.qrReady = '1';
     logo.style.cursor = 'pointer';
-    logo.title = 'Pulsa para compartir un tubo por QR';
 
     if (!document.getElementById('qr-modal')) {
       const modal = document.createElement('div');
@@ -92,7 +121,7 @@
       modal.innerHTML = `
         <div style="background:#1a1d26;padding:24px;border-radius:16px;text-align:center;max-width:90vw;">
           <h3 style="margin:0 0 12px;font-size:1.25rem;color:#fff;">Comparte un tubo</h3>
-          <p id="qr-info" style="margin:0 0 16px;color:#aaa;font-size:0.9rem;">El otro jugador escanea, toma el tubo y verá las notas de la canción.</p>
+          <p style="margin:0 0 16px;color:#aaa;font-size:0.9rem;">El otro jugador escanea y se sincroniza en tiempo real.</p>
           <div id="qr-code" style="background:white;padding:12px;border-radius:8px;display:inline-block;"></div>
           <p id="qr-tube-label" style="margin:12px 0 0;font-weight:600;color:#fff;"></p>
           <button id="qr-close" style="margin-top:16px;padding:8px 20px;border-radius:999px;background:#f0c14b;border:none;font-weight:600;cursor:pointer;">Cerrar</button>
@@ -107,43 +136,52 @@
     logo.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (!mySession) mySession = Math.random().toString(36).slice(2, 10);
       const tube = Math.floor(Math.random() * 8);
-      const session = Math.random().toString(36).slice(2, 8);
-      // Capture current song name if visible
-      let songName = '';
-      const songSpan = document.querySelector('button[aria-haspopup] span.truncate, button span.font-semibold');
-      if (songSpan) songName = songSpan.textContent.trim();
-      const url = location.origin + '/?join=' + session + '&tube=' + tube + (songName ? '&song=' + encodeURIComponent(songName) : '');
+      const url = location.origin + '/?join=' + mySession + '&tube=' + tube;
       qrDiv.innerHTML = '';
       new QRCode(qrDiv, { text: url, width: 220, height: 220 });
-      label.textContent = 'Tubo ' + (tube + 1) + (songName ? ' · ' + songName : '');
+      label.textContent = 'Tubo ' + (tube + 1);
       modal.style.display = 'flex';
-      // Dim on host
-      setTimeout(() => {
-        const lanes = document.querySelectorAll('.lanes > div');
-        if (lanes[tube]) {
-          lanes[tube].style.opacity = '0.25';
-          lanes[tube].style.filter = 'grayscale(0.7)';
-        }
-      }, 50);
+      // Join as host
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type:'join', sessionId: mySession, tube: null, role:'host' }));
+      }
     });
 
     document.getElementById('qr-close').onclick = () => modal.style.display = 'none';
     modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+    // Hook play button to broadcast
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn || !mySession || myRole !== 'host') return;
+      if (/play|reproduc|empezar|▶/i.test((btn.textContent||'') + (btn.getAttribute('aria-label')||''))) {
+        const songSpan = document.querySelector('button[aria-haspopup] span.truncate, button span.font-semibold');
+        const song = songSpan ? songSpan.textContent.trim() : '';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'play',
+            sessionId: mySession,
+            song: song,
+            startTime: Date.now() + 300
+          }));
+        }
+      }
+    }, true);
   }
 
   function init() {
+    connectWS();
     setupQR();
     applyTubeClaim();
-    if (isJoiner) tryStartSharedSong();
   }
 
   init();
   window.addEventListener('load', init);
-  setTimeout(init, 500);
-  setTimeout(init, 1500);
-  setTimeout(init, 3000);
-  const obs = new MutationObserver(() => { applyTubeClaim(); });
+  setTimeout(init, 600);
+  setTimeout(init, 1800);
+  const obs = new MutationObserver(applyTubeClaim);
   obs.observe(document.body, { childList: true, subtree: true });
 })();
 </script>
