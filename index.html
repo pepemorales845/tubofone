@@ -382,6 +382,83 @@
     dropNext();
   }
 
+  
+  function forceExtraSequence(song) {
+    if (!song || !song.notes) return;
+    const notes = song.notes;
+    // Update the visual sequence bar
+    const seq = document.querySelector('.seq') || document.querySelector('[data-seq-count]') || document.querySelector('footer .seq');
+    if (seq) {
+      seq.innerHTML = '';
+      notes.forEach((n, idx) => {
+        const span = document.createElement('span');
+        const label = n.replace(/[0-9]/g,'').toUpperCase().replace('C5',"C'");
+        span.textContent = label;
+        span.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;margin:2px;border-radius:50%;background:#2a2e3a;color:#fff;font-size:11px;font-weight:600;';
+        if (idx === 0) span.style.background = '#f0c14b';
+        seq.appendChild(span);
+      });
+      const count = document.querySelector('[data-seq-count], footer span.tabular-nums');
+      if (count) count.textContent = notes.length;
+    }
+    // Store for playback
+    window.TUBOFONE_ACTIVE_NOTES = notes;
+    window.TUBOFONE_ACTIVE_BPM = song.bpm || 100;
+  }
+
+  // Hook song selection
+  document.addEventListener('click', function(e) {
+    const opt = e.target.closest('[role="option"], div, button, li');
+    if (!opt) return;
+    const name = (opt.textContent || '').trim();
+    const extras = window.TUBOFONE_EXTRA_SONGS || [];
+    const found = extras.find(s => s.name === name);
+    if (found) {
+      window.TUBOFONE_CURRENT_EXTRA = found;
+      window.TUBOFONE_USE_EXTRA = true;
+      setTimeout(() => forceExtraSequence(found), 100);
+    }
+  }, true);
+
+  // Override play
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('button');
+    if (!btn || !window.TUBOFONE_USE_EXTRA || !window.TUBOFONE_ACTIVE_NOTES) return;
+    const txt = (btn.textContent||'') + (btn.getAttribute('aria-label')||'');
+    if (/play|reproduc|empezar|▶/i.test(txt)) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      playForcedNotes(window.TUBOFONE_ACTIVE_NOTES, window.TUBOFONE_ACTIVE_BPM);
+    }
+  }, true);
+
+  function playForcedNotes(notes, bpm) {
+    const interval = Math.max(180, 60000 / bpm / 1.6);
+    let i = 0;
+    const lanes = document.querySelectorAll('.lanes > div');
+    const seqSpans = document.querySelectorAll('.seq span, footer .seq span');
+    function next() {
+      if (i >= notes.length) return;
+      const note = notes[i];
+      const map = {c4:0,d4:1,e4:2,f4:3,g4:4,a4:5,b4:6,c5:7};
+      const idx = map[note] ?? 0;
+      if (lanes[idx]) {
+        const tube = lanes[idx].querySelector('.tube-hit') || lanes[idx];
+        tube.style.transition = 'all 0.12s';
+        tube.style.transform = 'translateY(-35px) scale(1.08)';
+        tube.style.filter = 'brightness(1.4)';
+        setTimeout(() => {
+          tube.style.transform = 'translateY(0) scale(1)';
+          tube.style.filter = '';
+        }, 160);
+      }
+      if (seqSpans[i]) seqSpans[i].style.background = '#f0c14b';
+      i++;
+      setTimeout(next, interval);
+    }
+    next();
+  }
+
   setTimeout(addCreatorButton, 800);
   setTimeout(addCreatorButton, 2000);
   const obs = new MutationObserver(addCreatorButton);
