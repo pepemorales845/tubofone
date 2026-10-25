@@ -9,43 +9,64 @@
     <button id="qr-close" style="margin-top:16px; padding:8px 20px; border-radius:999px; background:#f0c14b; border:none; font-weight:600; cursor:pointer;">Cerrar</button>
   </div>
 </div>
+
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function(){
-  const btn = document.getElementById('tubofone-logo');
-  const modal = document.getElementById('qr-modal');
-  const close = document.getElementById('qr-close');
-  const qrDiv = document.getElementById('qr-code');
-  const info = document.getElementById('qr-info');
-  const label = document.getElementById('qr-tube-label');
-  if(!btn) return;
+  function setupQR() {
+    const logo = document.getElementById('tubofone-logo') || document.querySelector('h1');
+    if (!logo || logo.dataset.qrReady) return;
+    logo.dataset.qrReady = '1';
+    logo.style.cursor = 'pointer';
+    logo.title = 'Pulsa para compartir tubo por QR';
 
-  // Parse join params
-  const params = new URLSearchParams(location.search);
-  const joinTube = params.get('tube');
-  if(joinTube !== null){
-    setTimeout(() => {
-      alert('Has tomado el tubo ' + (parseInt(joinTube)+1) + '. ¡Ahora tocas con el grupo!');
-      // Highlight the tube if possible
-      const tubes = document.querySelectorAll('.tube-hit');
-      if(tubes[joinTube]) tubes[joinTube].style.outline = '3px solid #f0c14b';
-    }, 800);
+    // Ensure modal exists
+    if (!document.getElementById('qr-modal')) {
+      const modal = document.createElement('div');
+      modal.id = 'qr-modal';
+      modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;align-items:center;justify-content:center;flex-direction:column;';
+      modal.innerHTML = `
+        <div style="background:#1a1d26;padding:24px;border-radius:16px;text-align:center;max-width:90vw;">
+          <h3 style="margin:0 0 12px;font-size:1.25rem;color:#fff;">Comparte un tubo</h3>
+          <p id="qr-info" style="margin:0 0 16px;color:#aaa;font-size:0.9rem;">El otro jugador escanea y se queda con este tubo.</p>
+          <div id="qr-code" style="background:white;padding:12px;border-radius:8px;display:inline-block;"></div>
+          <p id="qr-tube-label" style="margin:12px 0 0;font-weight:600;color:#fff;"></p>
+          <button id="qr-close" style="margin-top:16px;padding:8px 20px;border-radius:999px;background:#f0c14b;border:none;font-weight:600;cursor:pointer;">Cerrar</button>
+        </div>`;
+      document.body.appendChild(modal);
+    }
+
+    const modal = document.getElementById('qr-modal');
+    const qrDiv = document.getElementById('qr-code');
+    const label = document.getElementById('qr-tube-label');
+    const info = document.getElementById('qr-info');
+
+    logo.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const tube = Math.floor(Math.random() * 8);
+      const session = Math.random().toString(36).slice(2, 10);
+      const url = location.origin + '/?join=' + session + '&tube=' + tube;
+      qrDiv.innerHTML = '';
+      new QRCode(qrDiv, { text: url, width: 220, height: 220 });
+      label.textContent = 'Tubo ' + (tube + 1);
+      info.textContent = 'Escanea para tomar el tubo ' + (tube + 1) + ' y jugar juntos.';
+      modal.style.display = 'flex';
+    });
+
+    document.getElementById('qr-close').onclick = () => modal.style.display = 'none';
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
   }
 
-  let qr = null;
-  btn.addEventListener('click', () => {
-    // Pick a random tube or first available (0-7)
-    const tube = Math.floor(Math.random() * 8);
-    const session = Math.random().toString(36).slice(2, 10);
-    const url = location.origin + '/?join=' + session + '&tube=' + tube;
-    qrDiv.innerHTML = '';
-    qr = new QRCode(qrDiv, { text: url, width: 220, height: 220, colorDark: '#000', colorLight: '#fff' });
-    label.textContent = 'Tubo ' + (tube+1);
-    info.textContent = 'Escanea para tomar el tubo ' + (tube+1) + ' y jugar la canción juntos.';
-    modal.style.display = 'flex';
-  });
-  close.addEventListener('click', () => modal.style.display = 'none');
-  modal.addEventListener('click', e => { if(e.target === modal) modal.style.display = 'none'; });
+  // Run now, after load, and watch for re-renders
+  setupQR();
+  window.addEventListener('load', setupQR);
+  setTimeout(setupQR, 500);
+  setTimeout(setupQR, 1500);
+  setTimeout(setupQR, 3000);
+  const obs = new MutationObserver(setupQR);
+  obs.observe(document.body, { childList: true, subtree: true });
 })();
 </script>
 </body></html>
